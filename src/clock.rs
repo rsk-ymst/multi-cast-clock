@@ -19,7 +19,6 @@ pub fn start_clock_tick(shared_value: &Arc<Mutex<LogicClock>>) -> JoinHandle<()>
 
     thread::spawn(move || {
         loop {
-            // clock.lock().unwrap().tick();
             match clock.lock() {
                 Ok(mut guard) => guard.tick(),
                 Err(_) => panic!(),
