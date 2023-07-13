@@ -1,34 +1,19 @@
-use std::{net::UdpSocket, io};
+use std::{net::UdpSocket, io, default};
 
 use ipc::*;
-
-
 mod ipc;
-
-pub const NETWORK_ADDRESS: &str = "127.0.0.1:80";
-pub const BROAD_CAST_ADDRESS: &str = "127.255.255.255:8080";
+mod static_info;
 pub fn main() -> io::Result<()> {
-    let socket = UdpSocket::bind(NETWORK_ADDRESS).unwrap();
+    let socket = UdpSocket::bind(static_info::IP_ADDRESS_OPE).unwrap();
 
-    let hoge = Message::init(MessageContent::REQ(METHOD::UPDATE), None);
+    let hoge = Message::REQ(REQ { method: METHOD::UPDATE, ..Default::default() });
     let serialized = serde_json::to_vec(&hoge).unwrap();
 
     // サーバーにメッセージを送信する
     println!("Client sending message: {:?}", serialized);
     socket
-        .send_to(&serialized, BROAD_CAST_ADDRESS)
+        .send_to(&serialized, static_info::IP_ADDRESS_A)
         .unwrap();
 
     Ok(())
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use std::{io, net::UdpSocket};
-
-
-//     #[test]
-//     fn test_example() {
-//         // ソケットを作成する
-//     }
-// }

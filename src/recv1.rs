@@ -1,47 +1,80 @@
 mod clock;
 mod ipc;
-use std::net::UdpSocket;
-use std::sync::{Arc, Mutex};
-use std::time;
-use std::time::Duration;
-use std::{io, thread};
+mod static_info;
+
+use clock::LogicClock;
 use ipc::UdpMessageHandler;
-use serde::*;
-use serde_json::*;
+use std::sync::{Arc, Mutex};
+use std::{io, thread};
 
-use crate::ipc::{Message, MessageQueue, recv_message};
-
-const ASSIGNED_ADDRESS: &str = "127.0.0.1:8080";
+use crate::ipc::{recv_message, Message, MessageQueue, Receiver};
 
 // mod operator;
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    // ソケットを作成し、バインドする
+    let shared_value = Arc::new(Mutex::new(clock::LogicClock::default()));
+
+    /* クロック開始 */
+    clock::start_clock_tick(&shared_value);
+
     let mut queue = MessageQueue::new();
-    // let socket = UdpSocket::bind(ASSIGNED_ADDRESS)?;
-    let messageHandler = UdpMessageHandler::new(ASSIGNED_ADDRESS);
+    let message_handler = UdpMessageHandler::new(static_info::IP_ADDRESS_A);
 
     loop {
-        // let mut buffer: &mut [u8] = &mut [0u8; 2048];
+        /* REQ | ACK の受信 */
+        let mut message = message_handler.recv_message().await;
 
-        // let (n, src_addr) = socket.recv_from(buffer)?; // &mut 引数として欲しい
-        // let deserialized: Message = serde_json::from_slice(&buffer[..n]).expect("hoge");//  &が引数として欲しい --> as_refで受けわたし
+        match message {
+            Message::ACK(ack) => { /* トランザクション */ }
+            Message::REQ(mut req) => {
+                match req.timestamp {
+                    /* タイムスタンプあり --> 他レシーバからの受信 */
+                    Some(timestamp) => {
 
-        // let deserialized = recv_message(&socket);
-        let deserialized = messageHandler.recv_message().await;
-        queue.push_front(deserialized);
+                    }
 
-        println!("Server received message: {:#?}", queue);
+                    /* タイムスタンプなし --> オペレータからの受信 */
+                    None => {
+                        req.timestamp = get_current_timestamp(&shared_value);
+                        queue.push_front(Message::REQ(req.clone()));
 
-        // メッセージをハンドルする
-        // let json: Message = serde_json::from_str(&message).expect("hoge");//  &が引数として欲しい --> as_refで受けわたし
-        // let json: Message = serde_json::from_slice(&buffer[..n]).expect("hoge");//  &が引数として欲しい --> as_refで受けわたし
-        // let serialized = serde_json::to_string(&point).unwrap();
+                        message_handler
+                            .send_message(Message::REQ(req.clone()), static_info::IP_ADDRESS_B)
+                            .await;
 
+                        // ackの生成
+                        let ack = req.gen_ack(Receiver::A, get_current_timestamp(&shared_value));
 
-        // クライアントに返信する
-        // let response = "Hello from server!";
-        // println!("Server sending response: {:?}", json);
-        // socket.send_to(response.as_bytes(), src_addr)?;
+                        // ackをキューに入れる
+                        queue.push_front(Message::ACK(ack.clone()));
+
+                        // ackの送信
+                        message_handler
+                            .send_message(Message::ACK(ack), static_info::IP_ADDRESS_B)
+                            .await;
+                    }
+                }
+            }
+        }
+
+        // キューのソート
+        let a: Vec<Message> = queue.clone().into_iter().collect();
+        a.sort(|m|
+            match m {
+                Message::ACK(e) => e.timestamp,
+                Message::REQ(e) => e.timestamp,
+            }
+        );
+        // キューのチェック；もしACKが揃っていればタスク実行＆ACK削除．
+
+        println!("Server received message: {:#?}", a);
     }
+}
+
+pub fn get_current_timestamp(value: &Arc<Mutex<LogicClock>>) -> Option<f64> {
+    let current = value.lock().unwrap();
+    let res = current.clock;
+
+    drop(current); // Mutexロック解除
+    Some(res)
 }
