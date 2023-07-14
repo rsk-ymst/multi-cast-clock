@@ -4,10 +4,12 @@ mod static_info;
 
 use clock::LogicClock;
 use ipc::UdpMessageHandler;
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::{io, thread};
 
-use crate::ipc::{recv_message, Message, MessageQueue, Receiver};
+use crate::clock::TICK_INTERVAL;
+use crate::ipc::{Message, MessageContent, MessageQueue, Receiver};
 
 // mod operator;
 #[tokio::main]
@@ -24,50 +26,79 @@ async fn main() -> io::Result<()> {
         /* REQ | ACK の受信 */
         let mut message = message_handler.recv_message().await;
 
-        match message {
-            Message::ACK(ack) => { /* トランザクション */ }
-            Message::REQ(mut req) => {
-                match req.timestamp {
+        match message.content {
+            MessageContent::ACK(_ack) => {
+                /* トランザクション */
+                // ackをキューに入れる
+                queue.push_front(message.clone());
+                println!("****** ACK Receive ******\n{queue:#?}");
+            }
+            MessageContent::REQ(req) => {
+                match message.timestamp {
                     /* タイムスタンプあり --> 他レシーバからの受信 */
-                    Some(timestamp) => {
+                    Some(_timestamp) => {
+                        queue.push_front(message);
 
+                        /***************** tick *******************/
+                        thread::sleep(TICK_INTERVAL);
+
+                        let ack_message =
+                            req.gen_ack(Receiver::A, get_current_timestamp(&shared_value));
+
+                        // ackをキューに入れる
+                        queue.push_front(ack_message.clone());
+
+                        // ackの送信
+                        message_handler
+                            .send_message(ack_message, static_info::IP_ADDRESS_B)
+                            .await;
+
+                        println!("****** REQ Receive from Receiver ******\n{queue:#?}");
                     }
 
                     /* タイムスタンプなし --> オペレータからの受信 */
                     None => {
-                        req.timestamp = get_current_timestamp(&shared_value);
-                        queue.push_front(Message::REQ(req.clone()));
+                        /* リクエストにタイムスタンプを付与し、キューに入れる */
+                        message.timestamp = get_current_timestamp(&shared_value);
+                        queue.push_front(message.clone());
 
                         message_handler
-                            .send_message(Message::REQ(req.clone()), static_info::IP_ADDRESS_B)
+                            .send_message(message.clone(), static_info::IP_ADDRESS_B)
                             .await;
 
+                        /***************** tick *******************/
+                        thread::sleep(TICK_INTERVAL);
+
                         // ackの生成
-                        let ack = req.gen_ack(Receiver::A, get_current_timestamp(&shared_value));
+                        let ack_message =
+                            req.gen_ack(Receiver::A, get_current_timestamp(&shared_value));
 
                         // ackをキューに入れる
-                        queue.push_front(Message::ACK(ack.clone()));
+                        queue.push_front(ack_message.clone());
 
                         // ackの送信
                         message_handler
-                            .send_message(Message::ACK(ack), static_info::IP_ADDRESS_B)
+                            .send_message(ack_message, static_info::IP_ADDRESS_B)
                             .await;
+
+                        println!("****** REQ Receive from Operator ******\n{queue:#?}");
                     }
                 }
             }
         }
 
         // キューのソート
-        let a: Vec<Message> = queue.clone().into_iter().collect();
-        a.sort(|m|
-            match m {
-                Message::ACK(e) => e.timestamp,
-                Message::REQ(e) => e.timestamp,
-            }
-        );
-        // キューのチェック；もしACKが揃っていればタスク実行＆ACK削除．
+        let mut a: Vec<Message> = queue.clone().into_iter().collect();
+        a.sort_by(|a, b| {
+            a.timestamp
+                .unwrap()
+                .partial_cmp(&b.timestamp.unwrap())
+                .unwrap()
+        });
+        queue = VecDeque::from(a);
 
-        println!("Server received message: {:#?}", a);
+        // キューのチェック；もしACKが揃っていればタスク実行＆ACK削除．
+        check_and_execute_task(&mut queue);
     }
 }
 
@@ -77,4 +108,40 @@ pub fn get_current_timestamp(value: &Arc<Mutex<LogicClock>>) -> Option<f64> {
 
     drop(current); // Mutexロック解除
     Some(res)
+}
+
+pub fn check_and_execute_task(queue: &mut MessageQueue) {
+    /* 所有権の都合上、走査用のクローンを用意する */
+    let traversal_buf = queue.clone();
+
+    for (i, mes) in traversal_buf.iter().enumerate() {
+        if let MessageContent::REQ(req) = mes.content {
+            /* Ackの発行元を保持するベクタ */
+            let mut ack_publisher_list = Vec::new();
+
+            /* 削除する可能性があるidxを保持するベクタ。タスク完了後にReqとそれに紐づくAckを消去するために必要 */
+            let mut possibly_delete_idx = Vec::new();
+            possibly_delete_idx.push(i);
+
+            /* Reqに対応するAckを走査する */
+            for (j, m) in traversal_buf.iter().enumerate() {
+                if let MessageContent::ACK(ack) = &m.content {
+                    if req.src == ack.src {
+                        ack_publisher_list.push(ack.publisher);
+                        possibly_delete_idx.push(j);
+                    }
+                }
+            }
+
+            /* REQとそれに対応するACKが存在していたら、タスク実行＆タスクと対応Ackを消去 */
+            if ack_publisher_list.contains(&Receiver::A)
+                && ack_publisher_list.contains(&Receiver::B)
+            {
+                println!("EXEC: {req:#?}");
+                possibly_delete_idx.into_iter().for_each(|idx| {
+                    queue.remove(idx);
+                })
+            }
+        }
+    }
 }

@@ -1,13 +1,17 @@
 use serde::{Deserialize, Serialize};
 use serde_derive::{Deserialize, Serialize};
-use std::{collections::VecDeque, default, net::{UdpSocket, IpAddr}};
+use std::{
+    collections::VecDeque,
+    default,
+    net::{IpAddr, UdpSocket},
+};
 
 /* メッセージ管理用キュー */
 pub type MessageQueue = VecDeque<Message>;
 pub type Timestamp = Option<f64>;
 
 /* レシーバの定義。今回はAとBの */
-#[derive(Serialize, Deserialize, Debug, Clone, Default, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, Copy, PartialEq)]
 pub enum Receiver {
     #[default]
     A,
@@ -16,26 +20,33 @@ pub enum Receiver {
 
 /* メッセージの内容はACKもしくはREQとなる。*/
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum Message {
+pub struct Message {
+    pub content: MessageContent,
+    pub timestamp: Timestamp,
+}
+
+/* メッセージの内容はACKもしくはREQとなる。*/
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum MessageContent {
     ACK(ACK),
     REQ(REQ),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct ACK {
-    pub req_id: Option<usize>,        // REQに紐づくID. originと紐づいて初めて固有の値となる
-    pub src: Receiver,        // オペレーションの受付元
-    pub publisher: Receiver,  // 認証の発行元
-    pub timestamp: Timestamp, // オペレータからプロセスへのメッセージにタイムスタンプは不要なのでOptionとする。
+    pub req_id: Option<usize>, // REQに紐づくID. originと紐づいて初めて固有の値となる
+    pub src: Receiver,         // オペレーションの受付元
+    pub publisher: Receiver,   // 認証の発行元
+                               // pub timestamp: Timestamp, // オペレータからプロセスへのメッセージにタイムスタンプは不要なのでOptionとする。
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, Copy)]
 pub struct REQ {
-    pub id: Option<usize>,    // queue内で識別するために必要
-    pub src: Receiver,        // オペレーションの受付元
-    pub method: METHOD,       // 操作内容
-    pub done: bool,           // 操作が完了したかどうか
-    pub timestamp: Timestamp, // オペレータからプロセスへのメッセージにタイムスタンプは不要なのでOptionとする。
+    pub id: Option<usize>, // queue内で識別するために必要
+    pub src: Receiver,     // オペレーションの受付元
+    pub method: METHOD,    // 操作内容
+    pub done: bool,        // 操作が完了したかどうか
+                           // pub timestamp: Timestamp, // オペレータからプロセスへのメッセージにタイムスタンプは不要なのでOptionとする。
 }
 
 impl REQ {
@@ -49,31 +60,33 @@ impl REQ {
             src: Receiver::default(),
             method: METHOD::default(),
             done: false,
-            timestamp: None,
+            // timestamp: None,
         }
     }
 
-    pub fn gen_ack(&self, publisher: Receiver, timestamp: Timestamp) -> ACK {
-        ACK {
-            req_id: self.id,
-            src: self.src,
-            publisher,
+    pub fn gen_ack(&self, publisher: Receiver, timestamp: Timestamp) -> Message {
+        Message {
+            content: MessageContent::ACK(ACK {
+                req_id: self.id,
+                src: self.src,
+                publisher,
+            }),
             timestamp,
         }
     }
 }
 
-/* 今回、プロセスはCRUDアプリと仮定し、REQUESTの内容は以下のいずれかになる。*/
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+/* プロセスはCRUDアプリと仮定し、REQUESTの内容は以下のいずれかになる。*/
+#[derive(Serialize, Deserialize, Debug, Clone, Default, Copy)]
 pub enum METHOD {
     CREATE,
+    READ,
     #[default]
     UPDATE,
-    READ,
     DELETE,
 }
 
-pub async fn recv_message(socket: &UdpSocket) -> Message {
+pub async fn recv_message(socket: &UdpSocket) -> MessageContent {
     let mut buffer: &mut [u8] = &mut [0u8; 2048];
 
     match socket.recv_from(buffer) {
