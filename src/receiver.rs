@@ -14,13 +14,14 @@ use crate::ipc::{Message, MessageContent, MessageQueue, Receiver};
 // mod operator;
 #[tokio::main]
 async fn main() -> io::Result<()> {
+
     let shared_value = Arc::new(Mutex::new(clock::LogicClock::default()));
 
     /* クロック開始 */
     clock::start_clock_tick(&shared_value);
 
     let mut queue = MessageQueue::new();
-    let message_handler = UdpMessageHandler::new(static_info::IP_ADDRESS_B);
+    let message_handler = UdpMessageHandler::new(static_info::IP_ADDRESS_A);
 
     loop {
         /* REQ | ACK の受信 */
@@ -29,8 +30,8 @@ async fn main() -> io::Result<()> {
         match message.content {
             MessageContent::ACK(_ack) => {
                 /* トランザクション */
-                // ackをキューに入れる
                 queue.push_front(message.clone());
+
                 // println!("****** ACK Receive ******\n{queue:#?}");
                 display_log(&message);
             }
@@ -44,7 +45,7 @@ async fn main() -> io::Result<()> {
                         thread::sleep(TICK_INTERVAL);
 
                         let ack_message =
-                            req.gen_ack(Receiver::B, get_current_timestamp(&shared_value));
+                            req.gen_ack(Receiver::A, get_current_timestamp(&shared_value));
                         display_log(&ack_message);
 
                         // ackをキューに入れる
@@ -52,10 +53,12 @@ async fn main() -> io::Result<()> {
 
                         // ackの送信
                         message_handler
-                            .send_message(ack_message, static_info::IP_ADDRESS_A)
+                            .send_message(ack_message, static_info::IP_ADDRESS_B)
                             .await;
 
+                        #[cfg(debug_assertions)]
                         // println!("****** REQ Receive from Receiver ******\n{queue:#?}");
+
                         display_log(&message);
                     }
 
@@ -66,7 +69,7 @@ async fn main() -> io::Result<()> {
                         queue.push_front(message.clone());
 
                         message_handler
-                            .send_message(message.clone(), static_info::IP_ADDRESS_A)
+                            .send_message(message.clone(), static_info::IP_ADDRESS_B)
                             .await;
 
                         /***************** tick *******************/
@@ -74,14 +77,14 @@ async fn main() -> io::Result<()> {
 
                         // ackの生成
                         let ack_message =
-                            req.gen_ack(Receiver::B, get_current_timestamp(&shared_value));
+                            req.gen_ack(Receiver::A, get_current_timestamp(&shared_value));
 
                         // ackをキューに入れる
                         queue.push_front(ack_message.clone());
 
                         // ackの送信
                         message_handler
-                            .send_message(ack_message, static_info::IP_ADDRESS_A)
+                            .send_message(ack_message, static_info::IP_ADDRESS_B)
                             .await;
 
                         // println!("****** REQ Receive from Operator ******\n{queue:#?}");

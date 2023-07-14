@@ -3,7 +3,7 @@ mod ipc;
 mod static_info;
 
 use clock::LogicClock;
-use ipc::UdpMessageHandler;
+use ipc::{UdpMessageHandler, display_log};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::{io, thread};
@@ -31,19 +31,21 @@ async fn main() -> io::Result<()> {
                 /* トランザクション */
                 // ackをキューに入れる
                 queue.push_front(message.clone());
-                println!("****** ACK Receive ******\n{queue:#?}");
+                // println!("****** ACK Receive ******\n{queue:#?}");
+                display_log(&message);
             }
             MessageContent::REQ(req) => {
                 match message.timestamp {
                     /* タイムスタンプあり --> 他レシーバからの受信 */
                     Some(_timestamp) => {
-                        queue.push_front(message);
+                        queue.push_front(message.clone());
 
                         /***************** tick *******************/
                         thread::sleep(TICK_INTERVAL);
 
                         let ack_message =
                             req.gen_ack(Receiver::A, get_current_timestamp(&shared_value));
+                        display_log(&ack_message);
 
                         // ackをキューに入れる
                         queue.push_front(ack_message.clone());
@@ -53,7 +55,10 @@ async fn main() -> io::Result<()> {
                             .send_message(ack_message, static_info::IP_ADDRESS_B)
                             .await;
 
-                        println!("****** REQ Receive from Receiver ******\n{queue:#?}");
+                        #[cfg(debug_assertions)]
+                        // println!("****** REQ Receive from Receiver ******\n{queue:#?}");
+
+                        display_log(&message);
                     }
 
                     /* タイムスタンプなし --> オペレータからの受信 */
@@ -81,7 +86,8 @@ async fn main() -> io::Result<()> {
                             .send_message(ack_message, static_info::IP_ADDRESS_B)
                             .await;
 
-                        println!("****** REQ Receive from Operator ******\n{queue:#?}");
+                        // println!("****** REQ Receive from Operator ******\n{queue:#?}");
+                        display_log(&message);
                     }
                 }
             }

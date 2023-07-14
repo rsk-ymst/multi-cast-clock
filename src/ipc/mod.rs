@@ -129,3 +129,24 @@ impl UdpMessageHandler {
         self.socket.send_to(&serialized, dst_addr).unwrap();
     }
 }
+
+pub fn display_log(message: &Message) {
+    match message.content {
+        MessageContent::ACK(ack) => {
+            println!(
+                "ACK: {:?}-{:?}: {:.1}",
+                ack.src,
+                ack.publisher,
+                message.timestamp.unwrap()
+            );
+        }
+        MessageContent::REQ(req) => {
+            println!(
+                "REQ-{:?}: {:?} {:.1}",
+                req.src,
+                req.method,
+                message.timestamp.unwrap()
+            );
+        }
+    };
+}

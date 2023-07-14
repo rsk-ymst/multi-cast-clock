@@ -25,8 +25,8 @@ pub fn start_clock_tick(shared_value: &Arc<Mutex<LogicClock>>) -> JoinHandle<()>
             };
             thread::sleep(TICK_INTERVAL); // 普通にloopを回すとタイマーの値が大きくなりすぎるので、sleepをはさむ
 
-            #[cfg(debug_assertions)]
-            println!("clock: {:.1}", clock.lock().unwrap().clock);
+            // #[cfg(debug_assertions)]
+            // println!("clock: {:.1}", clock.lock().unwrap().clock);
         }
     })
 }
