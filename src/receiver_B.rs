@@ -3,13 +3,13 @@ mod ipc;
 mod static_info;
 
 use clock::LogicClock;
-use ipc::{UdpMessageHandler, display_log};
+use ipc::{display_log, UdpMessageHandler};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::{io, thread};
 
 use crate::clock::TICK_INTERVAL;
-use crate::ipc::{Message, MessageContent, MessageQueue, Receiver};
+use crate::ipc::{receiver_id, Message, MessageContent, MessageQueue};
 
 // mod operator;
 #[tokio::main]
@@ -44,7 +44,7 @@ async fn main() -> io::Result<()> {
                         thread::sleep(TICK_INTERVAL);
 
                         let ack_message =
-                            req.gen_ack(Receiver::B, get_current_timestamp(&shared_value));
+                            req.gen_ack(receiver_id::B, get_current_timestamp(&shared_value));
                         display_log(&ack_message);
 
                         // ackをキューに入れる
@@ -55,7 +55,7 @@ async fn main() -> io::Result<()> {
                             .send_message(ack_message, static_info::IP_ADDRESS_A)
                             .await;
 
-                        // println!("****** REQ Receive from Receiver ******\n{queue:#?}");
+                        // println!("****** REQ Receive from receiver_id ******\n{queue:#?}");
                         display_log(&message);
                     }
 
@@ -74,7 +74,7 @@ async fn main() -> io::Result<()> {
 
                         // ackの生成
                         let ack_message =
-                            req.gen_ack(Receiver::B, get_current_timestamp(&shared_value));
+                            req.gen_ack(receiver_id::B, get_current_timestamp(&shared_value));
 
                         // ackをキューに入れる
                         queue.push_front(ack_message.clone());
@@ -138,8 +138,8 @@ pub fn check_and_execute_task(queue: &mut MessageQueue) {
             }
 
             /* REQとそれに対応するACKが存在していたら、タスク実行＆タスクと対応Ackを消去 */
-            if ack_publisher_list.contains(&Receiver::A)
-                && ack_publisher_list.contains(&Receiver::B)
+            if ack_publisher_list.contains(&receiver_id::A)
+                && ack_publisher_list.contains(&receiver_id::B)
             {
                 println!("EXEC: {req:#?}");
                 possibly_delete_idx.into_iter().for_each(|idx| {

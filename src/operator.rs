@@ -1,40 +1,45 @@
-use std::{default, io, net::UdpSocket};
+#[cfg(test)]
+mod tests {
+    use std::net::UdpSocket;
 
-use ipc::*;
-mod ipc;
-mod static_info;
-pub fn main() -> io::Result<()> {
-    let socket = UdpSocket::bind(static_info::IP_ADDRESS_OPE).unwrap();
-
-    let message_A = Message {
-        content: MessageContent::REQ(REQ {
-            method: METHOD::UPDATE,
-            ..Default::default()
-        }),
-        timestamp: None,
+    use crate::{
+        ipc::{receiver_id, Message, MessageContent, METHOD, REQ},
+        static_info,
     };
 
-    let message_B = Message {
-        content: MessageContent::REQ(REQ {
-            method: METHOD::UPDATE,
-            src: Receiver::B,
-            ..Default::default()
-        }),
-        timestamp: None,
-    };
+    #[test]
+    fn it_works() {
+        let socket = UdpSocket::bind(static_info::IP_ADDRESS_OPE).unwrap();
 
-    let serialized_A = serde_json::to_vec(&message_A).unwrap();
-    let serialized_B = serde_json::to_vec(&message_B).unwrap();
+        let message_A = Message {
+            content: MessageContent::REQ(REQ {
+                method: METHOD::UPDATE,
+                src: 1,
+                ..Default::default()
+            }),
+            timestamp: None,
+        };
 
-    // サーバーにメッセージを送信する
-    println!("Client sending message: {:?}", serialized_A);
-    socket
-        .send_to(&serialized_A, static_info::IP_ADDRESS_A)
-        .unwrap();
+        let message_B = Message {
+            content: MessageContent::REQ(REQ {
+                method: METHOD::UPDATE,
+                src: 2,
+                ..Default::default()
+            }),
+            timestamp: None,
+        };
 
-    socket
-        .send_to(&serialized_B, static_info::IP_ADDRESS_B)
-        .unwrap();
+        let serialized_A = serde_json::to_vec(&message_A).unwrap();
+        let serialized_B = serde_json::to_vec(&message_B).unwrap();
 
-    Ok(())
+        // サーバーにメッセージを送信する
+        println!("Client sending message: {:?}", serialized_A);
+        socket
+            .send_to(&serialized_A, static_info::IP_ADDRESS_A)
+            .unwrap();
+
+        socket
+            .send_to(&serialized_B, static_info::IP_ADDRESS_B)
+            .unwrap();
+    }
 }
