@@ -1,12 +1,12 @@
 #[cfg(test)]
 mod tests {
-    use std::net::UdpSocket;
+    use std::{net::UdpSocket, thread, time::Duration};
 
     pub static IP_ADDRESS_A: &str = "127.0.0.1:8080"; // レシーバA
     pub static IP_ADDRESS_B: &str = "127.0.0.2:8080"; // レシーバB
     pub static IP_ADDRESS_OPE: &str = "127.0.0.3:8080";
 
-    use crate::ipc::{Message, MessageContent, METHOD, REQ};
+    use crate::{ipc::{Message, MessageContent, METHOD, REQ}, clock::TICK_INTERVAL};
 
     #[test]
     fn it_works() {
@@ -36,6 +36,8 @@ mod tests {
         // サーバーにメッセージを送信する
         println!("Client sending message: {:?}", serialized_A);
         socket.send_to(&serialized_A, IP_ADDRESS_A).unwrap();
+
+        // thread::sleep(Duration::from_millis(10));
 
         socket.send_to(&serialized_B, IP_ADDRESS_B).unwrap();
     }

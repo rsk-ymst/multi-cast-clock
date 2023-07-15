@@ -56,9 +56,7 @@ async fn main() -> io::Result<()> {
                 /* トランザクション */
                 queue.push_front(message.clone());
 
-                // println!("****** ACK Receive ******\n{queue:#?}");
-                println!("****** ACK Receive ******");
-                // display_log(&message);
+                println!("------------- <ACK received>");
             }
             MessageContent::REQ(req) => {
                 match message.timestamp {
@@ -80,7 +78,7 @@ async fn main() -> io::Result<()> {
                         message_handler
                             .send_message(ack_message, &TARGET_ADDRESS)
                             .await;
-                        println!("****** req Receive from receiver ******");
+                        println!("------------- <REQ received from receiver>");
                     }
 
                     /* タイムスタンプなし --> オペレータからの受信 */
@@ -109,26 +107,24 @@ async fn main() -> io::Result<()> {
                         message_handler
                             .send_message(ack_message, &TARGET_ADDRESS)
                             .await;
-                        println!("****** req Receive from operator ******");
+                        println!("------------- <REQ received from operator>");
                     }
                 }
             }
         }
 
-        // println!("pushed!: {:#?}", queue);
-
         // キューのソート
         let mut a: Vec<Message> = queue.clone().into_iter().collect();
-        // println!("pushed a!: {:#?}", a);
+
         a.sort_by(|a, b| {
             a.timestamp
                 .unwrap()
                 .partial_cmp(&b.timestamp.unwrap())
                 .unwrap()
         });
-        // println!("pushed a!: {:#?}", a.len());
+
         a.iter().for_each(|x| display_log(x));
-        println!("------------------");
+        println!("------------- <sorted>");
         queue = VecDeque::from(a);
 
         // キューのチェック；もしACKが揃っていればタスク実行＆ACK削除．
@@ -176,7 +172,7 @@ pub fn check_and_execute_task(queue: &mut MessageQueue) {
                 // println!("trav: {:#?}", traversal_buf);
                 // println!("origin: {:#?}", traversal_buf);
                 // traversal_buf.iter().for_each(|x| println!("{:#?}", x));
-                // println!("-------------------");
+                println!("------------- <remove required REQ and ACK>");
                 // queue.iter().for_each(|x| println!("{:#?}", x));
 
                 // println!("-------------------");
@@ -187,14 +183,14 @@ pub fn check_and_execute_task(queue: &mut MessageQueue) {
                     let buf = queue.clone();
                     for (i, e) in buf.iter().enumerate() {
                         if mes == *e {
-                            println!("remove --> {:#?}", queue.get(i));
+                            // println!("remove --> {:#?}", queue.get(i));
                             queue.remove(i);
                         }
                     }
                 });
 
-                println!("---------------------------- after removed");
-                println!("{:#?}", queue);
+                // println!("---------------------------- after removed");
+                // println!("{:#?}", queue);
             }
         }
     }
