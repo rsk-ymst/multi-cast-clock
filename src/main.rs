@@ -1,14 +1,13 @@
 mod clock;
 mod ipc;
 mod operator;
-mod static_info;
 
 use clock::LogicClock;
 use ipc::{display_log, UdpMessageHandler};
 use std::collections::VecDeque;
 use std::env::args;
 use std::sync::{Arc, Mutex};
-use std::{clone, io, thread};
+use std::{io, thread};
 
 use crate::clock::TICK_INTERVAL;
 use crate::ipc::{receiver_id, Message, MessageContent, MessageQueue};
