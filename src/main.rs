@@ -15,6 +15,7 @@ use crate::ipc::{receiver_id, Message, MessageContent, MessageQueue};
 #[macro_use]
 extern crate lazy_static;
 
+/* 実行時の引数をもとに静的なグローバル変数を初期化 */
 lazy_static! {
     static ref MY_RECEIVER_ID: receiver_id = args()
         .collect::<Vec<String>>()
@@ -66,6 +67,7 @@ async fn main() -> io::Result<()> {
 
                         /***************** tick *******************/
                         thread::sleep(TICK_INTERVAL);
+                        clock::sleep_random_interval();
 
                         let ack_message =
                             req.gen_ack(*MY_RECEIVER_ID, get_current_timestamp(&shared_value));
@@ -83,6 +85,9 @@ async fn main() -> io::Result<()> {
 
                     /* タイムスタンプなし --> オペレータからの受信 */
                     None => {
+                        /* レシーバ間のタイムスタンプに若干の差分を生じさせるために、スリープさせる */
+                        clock::sleep_random_interval();
+
                         /* リクエストにタイムスタンプを付与し、キューに入れる */
                         message.timestamp = get_current_timestamp(&shared_value);
                         queue.push_front(message.clone());
@@ -93,7 +98,8 @@ async fn main() -> io::Result<()> {
                             .await;
 
                         /***************** tick *******************/
-                        thread::sleep(TICK_INTERVAL);
+                        // thread::sleep(TICK_INTERVAL);
+                        clock::sleep_random_interval();
 
                         // ackの生成
                         let ack_message =
@@ -124,12 +130,12 @@ async fn main() -> io::Result<()> {
         });
 
         a.iter().for_each(|x| display_log(x));
-        println!("------------- <sorted>");
+        // println!("------------- <sorted>");
         queue = VecDeque::from(a);
+        // queue.iter().for_each(|x| display_log(x));
 
         // キューのチェック；もしACKが揃っていればタスク実行＆ACK削除．
         check_and_execute_task(&mut queue);
-        queue.iter().for_each(|x| display_log(x));
     }
 }
 
@@ -168,7 +174,7 @@ pub fn check_and_execute_task(queue: &mut MessageQueue) {
             if ack_publisher_list.contains(&MY_RECEIVER_ID)
                 && ack_publisher_list.contains(&TARGET_RECEIVER_ID)
             {
-                println!("EXEC: {req:#?}");
+                println!("------------- <exec>\n{req:#?}");
                 // println!("trav: {:#?}", traversal_buf);
                 // println!("origin: {:#?}", traversal_buf);
                 // traversal_buf.iter().for_each(|x| println!("{:#?}", x));
@@ -188,10 +194,15 @@ pub fn check_and_execute_task(queue: &mut MessageQueue) {
                         }
                     }
                 });
+                queue.iter().for_each(|x| display_log(x));
 
                 // println!("---------------------------- after removed");
                 // println!("{:#?}", queue);
             }
         }
     }
+}
+
+pub fn extract_min_timestamp_req() {
+    
 }
