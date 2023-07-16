@@ -120,18 +120,19 @@ async fn main() -> io::Result<()> {
         }
 
         // キューのソート
-        let mut a: Vec<Message> = queue.clone().into_iter().collect();
+        // let mut a: Vec<Message> = queue.clone().into_iter().collect();
 
-        a.sort_by(|a, b| {
-            a.timestamp
-                .unwrap()
-                .partial_cmp(&b.timestamp.unwrap())
-                .unwrap()
-        });
+        // a.sort_by(|a, b| {
+        //     a.timestamp
+        //         .unwrap()
+        //         .partial_cmp(&b.timestamp.unwrap())
+        //         .unwrap()
+        // });
+        queue = sort_message_queue(&queue);
 
-        a.iter().for_each(|x| display_log(x));
+        queue.iter().for_each(|x| display_log(x));
         // println!("------------- <sorted>");
-        queue = VecDeque::from(a);
+        // queue = VecDeque::from(a);
         // queue.iter().for_each(|x| display_log(x));
 
         // キューのチェック；もしACKが揃っていればタスク実行＆ACK削除．
@@ -149,19 +150,27 @@ pub fn get_current_timestamp(value: &Arc<Mutex<LogicClock>>) -> Option<f64> {
 
 pub fn check_and_execute_task(queue: &mut MessageQueue) {
     /* 所有権の都合上、走査用のクローンを用意する */
-    let traversal_buf = queue.clone();
+    // let traversal_buf = queue.clone();
 
-    for (_, mes) in traversal_buf.iter().enumerate() {
-        if let MessageContent::REQ(req) = mes.content {
+    loop {
+        /* キューの中で最もタイムスタンプが小さいREQを取得 */
+        let target_req = match get_min_timestamp_req(&queue) {
+            Ok(req) => req,
+            Err(_) => return,
+        };
+
+        /* 削除する可能性があるメッセージを保持するベクタ */
+        let mut possibly_delete_message: Vec<Message> = Vec::new();
+        possibly_delete_message.push(target_req.clone());
+        // println!("!!!!!!!!!\n{:#?}", target_req);
+
+        // for (_, mes) in target_req.iter().enumerate() {
+        if let MessageContent::REQ(req) = target_req.content {
             /* Ackの発行元を保持するベクタ */
             let mut ack_publisher_list = Vec::new();
 
-            /* 削除する可能性があるメッセージを保持するベクタ */
-            let mut possibly_delete_message: Vec<Message> = Vec::new();
-            possibly_delete_message.push(mes.clone());
-
             /* Reqに対応するAckを走査する */
-            for (j, m) in traversal_buf.iter().enumerate() {
+            for (_, m) in queue.iter().enumerate() {
                 if let MessageContent::ACK(ack) = &m.content {
                     if req.src == ack.src {
                         ack_publisher_list.push(ack.publisher);
@@ -178,7 +187,6 @@ pub fn check_and_execute_task(queue: &mut MessageQueue) {
                 // println!("trav: {:#?}", traversal_buf);
                 // println!("origin: {:#?}", traversal_buf);
                 // traversal_buf.iter().for_each(|x| println!("{:#?}", x));
-                println!("------------- <remove required REQ and ACK>");
                 // queue.iter().for_each(|x| println!("{:#?}", x));
 
                 // println!("-------------------");
@@ -194,15 +202,46 @@ pub fn check_and_execute_task(queue: &mut MessageQueue) {
                         }
                     }
                 });
+
+                println!("------------- <remove required REQ and ACK>");
                 queue.iter().for_each(|x| display_log(x));
 
                 // println!("---------------------------- after removed");
                 // println!("{:#?}", queue);
+            } else {
+                /* 消費できないREQがある時点でチェックを終了 */
+                return;
             }
         }
     }
+    // }
 }
 
-pub fn extract_min_timestamp_req() {
-    
+pub fn get_min_timestamp_req(queue: &MessageQueue) -> Result<Message, ()> {
+    let mut req_rev: Vec<Message> = Vec::new();
+
+    queue.iter().for_each(|m| {
+        if let MessageContent::REQ(_) = m.content {
+            req_rev.push(m.clone());
+        }
+    });
+
+    if req_rev.len() == 0 {
+        return Err(());
+    }
+
+    Ok(req_rev.get(0).unwrap().clone())
+}
+
+pub fn sort_message_queue(queue: &MessageQueue) -> MessageQueue {
+    let mut buf_vec: Vec<Message> = queue.clone().into_iter().collect();
+
+    buf_vec.sort_by(|a, b| {
+        a.timestamp
+            .unwrap()
+            .partial_cmp(&b.timestamp.unwrap())
+            .unwrap()
+    });
+
+    VecDeque::from(buf_vec)
 }
