@@ -1,6 +1,7 @@
 mod clock;
 mod ipc;
 mod operator;
+mod utils;
 
 use clock::LogicClock;
 use ipc::{display_log, UdpMessageHandler};
@@ -10,29 +11,17 @@ use std::sync::{Arc, Mutex};
 use std::{io, thread};
 
 use crate::clock::TICK_INTERVAL;
-use crate::ipc::{receiver_id, Message, MessageContent, MessageQueue};
+use crate::ipc::{Message, MessageContent, MessageQueue, ReceiverId};
 
 #[macro_use]
 extern crate lazy_static;
 
 /* 実行時の引数をもとに静的なグローバル変数を初期化 */
 lazy_static! {
-    static ref MY_RECEIVER_ID: receiver_id = args()
-        .collect::<Vec<String>>()
-        .get(1)
-        .unwrap()
-        .as_str()
-        .parse()
-        .unwrap();
-    static ref TARGET_RECEIVER_ID: receiver_id = args()
-        .collect::<Vec<String>>()
-        .get(2)
-        .unwrap()
-        .as_str()
-        .parse()
-        .unwrap();
-    static ref MY_ADDRESS: String = args().collect::<Vec<String>>().get(3).unwrap().to_string();
-    static ref TARGET_ADDRESS: String = args().collect::<Vec<String>>().get(4).unwrap().to_string();
+    static ref MY_RECEIVER_ID: ReceiverId = utils::args::get_as_usize(1);
+    static ref TARGET_RECEIVER_ID: ReceiverId = utils::args::get_as_usize(2);
+    static ref MY_ADDRESS: String = utils::args::get_as_String(3);
+    static ref TARGET_ADDRESS: String = utils::args::get_as_String(4);
 }
 
 // mod operator;

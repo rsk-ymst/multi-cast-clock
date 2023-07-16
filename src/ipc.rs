@@ -11,8 +11,7 @@ pub type MessageQueue = VecDeque<Message>;
 pub type Timestamp = Option<f64>;
 
 /* レシーバの定義。今回はAとBの */
-pub type receiver_id = usize;
-
+pub type ReceiverId = usize;
 
 #[derive(PartialEq)]
 /* メッセージの内容はACKもしくはREQとなる。*/
@@ -29,19 +28,17 @@ pub enum MessageContent {
     ACK(ACK),
     REQ(REQ),
 }
-#[derive(PartialEq)]
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(PartialEq, Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct ACK {
     pub req_id: Option<usize>, // REQに紐づくID. originと紐づいて初めて固有の値となる
-    pub src: receiver_id,      // オペレーションの受付元
-    pub publisher: receiver_id, // 認証の発行元
+    pub src: ReceiverId,       // オペレーションの受付元
+    pub publisher: ReceiverId, // 認証の発行元
 }
 
-#[derive(PartialEq)]
-#[derive(Serialize, Deserialize, Debug, Clone, Default, Copy)]
+#[derive(PartialEq, Serialize, Deserialize, Debug, Clone, Default, Copy)]
 pub struct REQ {
     pub id: Option<usize>, // queue内で識別するために必要
-    pub src: receiver_id,  // オペレーションの受付元
+    pub src: ReceiverId,   // オペレーションの受付元
     pub method: METHOD,    // 操作内容
     pub done: bool,        // 操作が完了したかどうか
 }
@@ -54,14 +51,14 @@ impl REQ {
     pub fn default() -> Self {
         REQ {
             id: None,
-            src: receiver_id::default(),
+            src: ReceiverId::default(),
             method: METHOD::default(),
             done: false,
             // timestamp: None,
         }
     }
 
-    pub fn gen_ack(&self, publisher: receiver_id, timestamp: Timestamp) -> Message {
+    pub fn gen_ack(&self, publisher: ReceiverId, timestamp: Timestamp) -> Message {
         Message {
             content: MessageContent::ACK(ACK {
                 req_id: self.id,
@@ -138,7 +135,7 @@ pub fn display_log(message: &Message) {
                 ack.publisher,
                 message.timestamp.unwrap()
             );
-        },
+        }
         MessageContent::REQ(req) => {
             println!(
                 "REQ-{:?}: {:?} {:.1}",
