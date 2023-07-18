@@ -6,7 +6,6 @@ mod utils;
 use clock::LogicClock;
 use ipc::{display_log, UdpMessageHandler};
 use std::collections::VecDeque;
-use std::env::args;
 use std::sync::{Arc, Mutex};
 use std::{io, thread};
 
@@ -60,7 +59,6 @@ async fn main() -> io::Result<()> {
 
                         let ack_message =
                             req.gen_ack(*MY_RECEIVER_ID, get_current_timestamp(&shared_value));
-                        // display_log(&ack_message);
 
                         // ackをキューに入れる
                         queue.push_front(ack_message.clone());
@@ -80,14 +78,12 @@ async fn main() -> io::Result<()> {
                         /* リクエストにタイムスタンプを付与し、キューに入れる */
                         message.timestamp = get_current_timestamp(&shared_value);
                         queue.push_front(message.clone());
-                        // println!("pushed!: {:#?}", queue);
 
                         message_handler
                             .send_message(message.clone(), &TARGET_ADDRESS)
                             .await;
 
                         /***************** tick *******************/
-                        // thread::sleep(TICK_INTERVAL);
                         clock::sleep_random_interval();
 
                         // ackの生成
@@ -96,7 +92,6 @@ async fn main() -> io::Result<()> {
 
                         // ackをキューに入れる
                         queue.push_front(ack_message.clone());
-                        // println!("pushed!: {:#?}", queue);
 
                         // ackの送信
                         message_handler
@@ -138,24 +133,14 @@ pub fn get_current_timestamp(value: &Arc<Mutex<LogicClock>>) -> Option<f64> {
 }
 
 pub fn check_and_execute_task(queue: &mut MessageQueue) {
-    /* 所有権の都合上、走査用のクローンを用意する */
-    // let traversal_buf = queue.clone();
+    let traversal_buf = queue.clone();
+    for (_, message) in traversal_buf.iter().enumerate() {
+        if let MessageContent::REQ(req) = message.content {
+            /* 削除する可能性があるメッセージを保持するベクタ */
+            let mut possibly_delete_message: Vec<Message> = Vec::new();
 
-    loop {
-        /* キューの中で最もタイムスタンプが小さいREQを取得 */
-        let target_req = match get_min_timestamp_req(&queue) {
-            Ok(req) => req,
-            Err(_) => return,
-        };
-
-        /* 削除する可能性があるメッセージを保持するベクタ */
-        let mut possibly_delete_message: Vec<Message> = Vec::new();
-        possibly_delete_message.push(target_req.clone());
-        // println!("!!!!!!!!!\n{:#?}", target_req);
-
-        // for (_, mes) in target_req.iter().enumerate() {
-        if let MessageContent::REQ(req) = target_req.content {
             /* Ackの発行元を保持するベクタ */
+            possibly_delete_message.push(message.clone());
             let mut ack_publisher_list = Vec::new();
 
             /* Reqに対応するAckを走査する */
@@ -173,12 +158,6 @@ pub fn check_and_execute_task(queue: &mut MessageQueue) {
                 && ack_publisher_list.contains(&TARGET_RECEIVER_ID)
             {
                 println!("------------- <exec>\n{req:#?}");
-                // println!("trav: {:#?}", traversal_buf);
-                // println!("origin: {:#?}", traversal_buf);
-                // traversal_buf.iter().for_each(|x| println!("{:#?}", x));
-                // queue.iter().for_each(|x| println!("{:#?}", x));
-
-                // println!("-------------------");
 
                 /* REQと対応ACKを消去 */
                 possibly_delete_message.into_iter().for_each(|mes| {
@@ -186,7 +165,6 @@ pub fn check_and_execute_task(queue: &mut MessageQueue) {
                     let buf = queue.clone();
                     for (i, e) in buf.iter().enumerate() {
                         if mes == *e {
-                            // println!("remove --> {:#?}", queue.get(i));
                             queue.remove(i);
                         }
                     }
@@ -194,16 +172,10 @@ pub fn check_and_execute_task(queue: &mut MessageQueue) {
 
                 println!("------------- <remove required REQ and ACK>");
                 queue.iter().for_each(|x| display_log(x));
-
-                // println!("---------------------------- after removed");
-                // println!("{:#?}", queue);
-            } else {
-                /* 消費できないREQがある時点でチェックを終了 */
-                return;
             }
+            // }
         }
     }
-    // }
 }
 
 pub fn get_min_timestamp_req(queue: &MessageQueue) -> Result<Message, ()> {
