@@ -4,7 +4,7 @@ mod operator;
 mod utils;
 
 use clock::LogicClock;
-use ipc::{display_log, UdpMessageHandler};
+use ipc::display_log;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::net::{Ipv4Addr, UdpSocket};
@@ -73,11 +73,6 @@ async fn main() -> io::Result<()> {
             MessageContent::OPE(request) => {
                 /* レシーバ間のタイムスタンプに若干の差分を生じさせるために、スリープさせる */
                 clock::sleep_random_interval(1);
-
-                /* リクエストにタイムスタンプを付与し、キューに入れる */
-                // display_log(&message);
-                // message.timestamp = get_current_timestamp(&shared_value);
-                // display_log(&message);
 
                 let timestamped_message = Message {
                     content: ipc::MessageContent::REQ(request.clone()),
