@@ -13,7 +13,7 @@ mod tests {
         let socket = UdpSocket::bind(IP_ADDRESS_OPE).unwrap();
 
         let message_A = Message {
-            content: MessageContent::REQ(REQ {
+            content: MessageContent::OPE(REQ {
                 method: METHOD::UPDATE,
                 src: 1,
                 ..Default::default()
@@ -22,7 +22,7 @@ mod tests {
         };
 
         let message_B = Message {
-            content: MessageContent::REQ(REQ {
+            content: MessageContent::OPE(REQ {
                 method: METHOD::UPDATE,
                 src: 2,
                 ..Default::default()

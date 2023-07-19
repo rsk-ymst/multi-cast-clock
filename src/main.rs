@@ -5,6 +5,7 @@ mod utils;
 
 use clock::LogicClock;
 use ipc::{display_log, UdpMessageHandler};
+use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::net::{Ipv4Addr, UdpSocket};
 use std::str::FromStr;
@@ -12,15 +13,15 @@ use std::sync::{Arc, Mutex};
 use std::{io, thread};
 
 use crate::clock::TICK_INTERVAL;
-use crate::ipc::{Message, MessageContent, MessageQueue, ReceiverId};
+use crate::ipc::{Message, MessageContent, MessageQueue, ReceiverId, REQ};
 
 #[macro_use]
 extern crate lazy_static;
 
 /* 実行時の引数をもとに静的なグローバル変数を初期化 */
 lazy_static! {
-    static ref MY_RECEIVER_ID: ReceiverId = utils::args::get_as_usize(1);
-    static ref TARGET_RECEIVER_ID: ReceiverId = utils::args::get_as_usize(2);
+    static ref MY_RECEIVER_ID: usize = utils::args::get_as_usize(1);
+    static ref TARGET_RECEIVER_ID: usize = utils::args::get_as_usize(2);
     static ref MY_ADDRESS: String = utils::args::get_as_String(3);
     static ref TARGET_ADDRESS: String = utils::args::get_as_String(4);
 }
@@ -56,89 +57,99 @@ async fn main() -> io::Result<()> {
         let mut message: Message = serde_json::from_slice(&buffer[..n]).expect("hoge");
 
         match message.content {
+            // =======================================
+            //              ACKの受信
+            // =======================================
             MessageContent::ACK(_ack) => {
                 /* トランザクション */
                 queue.push_front(message.clone());
 
                 println!("------------- <ACK received>");
             }
-            MessageContent::REQ(req) => {
-                match message.timestamp {
-                    /* タイムスタンプあり --> 他レシーバからの受信 */
-                    Some(_timestamp) => {
-                        queue.push_front(message.clone());
 
-                        /***************** tick *******************/
-                        thread::sleep(TICK_INTERVAL);
-                        clock::sleep_random_interval(1);
+            // =======================================
+            //         オペレータからのリクエスト
+            // =======================================
+            MessageContent::OPE(request) => {
+                /* レシーバ間のタイムスタンプに若干の差分を生じさせるために、スリープさせる */
+                clock::sleep_random_interval(1);
 
-                        let ack_message =
-                            req.gen_ack(*MY_RECEIVER_ID, get_current_timestamp(&shared_value));
-                        let serialized = serde_json::to_vec(&ack_message).unwrap();
-                        // ackの送信
-                        // マルチキャストメッセージを送信するスレッド
-                        let send_socket = socket.try_clone().expect("Failed to clone socket");
-                        thread::spawn(move || {
-                            send_socket
-                                .send_to(&serialized, &format!("{}:{}", MULTICAST_ADDR, PORT))
-                                .expect("Failed to send multicast message");
-                        });
-                    }
+                /* リクエストにタイムスタンプを付与し、キューに入れる */
+                // display_log(&message);
+                // message.timestamp = get_current_timestamp(&shared_value);
+                // display_log(&message);
 
-                    /* タイムスタンプなし --> オペレータからの受信 */
-                    None => {
-                        /* レシーバ間のタイムスタンプに若干の差分を生じさせるために、スリープさせる */
-                        clock::sleep_random_interval(1);
+                let timestamped_message = Message {
+                    content: ipc::MessageContent::REQ(request.clone()),
+                    timestamp: get_current_timestamp(&shared_value),
+                };
 
-                        /* リクエストにタイムスタンプを付与し、キューに入れる */
-                        message.timestamp = get_current_timestamp(&shared_value);
-                        queue.push_front(message.clone());
+                queue.push_front(timestamped_message.clone());
 
-                        let send_socket = socket.try_clone().expect("Failed to clone socket");
-                        thread::spawn(move || {
-                            // loop {
-                            send_socket
-                                .send_to(
-                                    &serde_json::to_vec(&message).unwrap(),
-                                    &format!("{}:{}", MULTICAST_ADDR, PORT),
-                                )
-                                .expect("Failed to send multicast message");
-                            // }
-                        });
+                /* REQを他プロセスに送信(REQの複製) */
+                let send_socket = socket.try_clone().expect("Failed to clone socket");
+                let send_message = timestamped_message.clone();
+                thread::spawn(move || {
+                    send_socket
+                        .send_to(
+                            &serde_json::to_vec(&send_message).unwrap(),
+                            &format!("{}:{}", &*MULTICAST_ADDR, PORT),
+                        )
+                        .expect("Failed to send multicast message");
+                });
 
-                        /***************** tick *******************/
-                        clock::sleep_random_interval(1);
+                /***************** tick *******************/
+                clock::sleep_random_interval(1);
 
-                        // ackの生成
-                        let ack_message =
-                            req.gen_ack(*MY_RECEIVER_ID, get_current_timestamp(&shared_value));
-                        let serialized = serde_json::to_vec(&ack_message).unwrap();
-                        // ackをキューに入れる
-                        // queue.push_front(ack_message.clone());
+                // ackの生成
+                if let MessageContent::REQ(req) = timestamped_message.content {
+                    let ack_message =
+                        req.gen_ack(*MY_RECEIVER_ID, get_current_timestamp(&shared_value));
 
-                        // ackの送信
-                        let send_socket = socket.try_clone().expect("Failed to clone socket");
-                        thread::spawn(move || {
-                            send_socket
-                                .send_to(&serialized, &format!("{}:{}", MULTICAST_ADDR, PORT))
-                                .expect("Failed to send multicast message");
-                        });
-                    }
+                    let serialized = serde_json::to_vec(&ack_message).unwrap();
+
+                    clock::sleep_random_interval(1);
+
+                    /* 非同期的マルチキャスト */
+                    let send_socket = socket.try_clone().expect("Failed to clone socket");
+                    thread::spawn(move || {
+                        send_socket
+                            .send_to(&serialized, &format!("{}:{}", MULTICAST_ADDR, PORT))
+                            .expect("Failed to send multicast message");
+                    });
                 }
             }
+
+            // =======================================
+            //       プロセスからのリクエスト受信
+            // =======================================
+            MessageContent::REQ(req) => {
+                if req.src.cmp(&MY_RECEIVER_ID) == Ordering::Equal {
+                    println!("its mine");
+                    continue;
+                }
+
+                queue.push_front(message.clone());
+
+                /***************** tick *******************/
+                thread::sleep(TICK_INTERVAL);
+                // clock::sleep_random_interval(1);
+
+                let ack_message =
+                    req.gen_ack(*MY_RECEIVER_ID, get_current_timestamp(&shared_value));
+                let serialized = serde_json::to_vec(&ack_message).unwrap();
+
+                // ackの送信
+                // マルチキャストメッセージを送信するスレッド
+                let send_socket = socket.try_clone().expect("Failed to clone socket");
+                thread::spawn(move || {
+                    send_socket
+                        .send_to(&serialized, &format!("{}:{}", MULTICAST_ADDR, PORT))
+                        .expect("Failed to send multicast message");
+                });
+            }
         }
-
-        // キューのソート
-        // let mut a: Vec<Message> = queue.clone().into_iter().collect();
-
-        // a.sort_by(|a, b| {
-        //     a.timestamp
-        //         .unwrap()
-        //         .partial_cmp(&b.timestamp.unwrap())
-        //         .unwrap()
-        // });
         queue = sort_message_queue(&queue);
-
         queue.iter().for_each(|x| display_log(x));
         // println!("------------- <sorted>");
         // queue = VecDeque::from(a);

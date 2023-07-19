@@ -25,8 +25,9 @@ pub struct Message {
 /* メッセージの内容はACKもしくはREQとなる。*/
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum MessageContent {
-    ACK(ACK),
-    REQ(REQ),
+    ACK(ACK), // リクエストに対する認証
+    REQ(REQ), // レシーバが発行するリクエスト
+    OPE(REQ), // オペレータが発行するリクエスト
 }
 #[derive(PartialEq, Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct ACK {
@@ -38,7 +39,7 @@ pub struct ACK {
 #[derive(PartialEq, Serialize, Deserialize, Debug, Clone, Default, Copy)]
 pub struct REQ {
     pub id: Option<usize>, // queue内で識別するために必要
-    pub src: ReceiverId,   // オペレーションの受付元
+    pub src: usize,   // オペレーションの受付元
     pub method: METHOD,    // 操作内容
     pub done: bool,        // 操作が完了したかどうか
 }
@@ -141,8 +142,14 @@ pub fn display_log(message: &Message) {
                 "REQ-{:?}: {:?} {:.1}",
                 req.src,
                 req.method,
-                message.timestamp.unwrap()
+                match message.timestamp {
+                    Some(val) => val,
+                    _ => -1.0,
+                }
             );
+        }
+        _ => {
+            return;
         }
     };
 
