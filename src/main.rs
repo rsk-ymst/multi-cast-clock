@@ -6,6 +6,8 @@ mod utils;
 use clock::LogicClock;
 use ipc::{display_log, UdpMessageHandler};
 use std::collections::VecDeque;
+use std::net::{Ipv4Addr, UdpSocket};
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::{io, thread};
 
@@ -23,6 +25,9 @@ lazy_static! {
     static ref TARGET_ADDRESS: String = utils::args::get_as_String(4);
 }
 
+const MULTICAST_ADDR: &str = "239.0.0.1";
+const PORT: u16 = 8080;
+
 // mod operator;
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -34,11 +39,21 @@ async fn main() -> io::Result<()> {
     clock::start_clock_tick(&shared_value);
 
     let mut queue = MessageQueue::new();
-    let message_handler = UdpMessageHandler::new(&MY_ADDRESS);
+
+    let socket = UdpSocket::bind(&*MY_ADDRESS).expect("Failed to bind socket");
+    socket
+        .join_multicast_v4(
+            &Ipv4Addr::from_str(MULTICAST_ADDR).unwrap(),
+            &Ipv4Addr::LOCALHOST,
+        )
+        .expect("Failed to join multicast group");
 
     loop {
+        let buffer: &mut [u8] = &mut [0u8; 2048];
+
         /* REQ | ACK の受信 */
-        let mut message = message_handler.recv_message().await;
+        let (n, _) = socket.recv_from(buffer).unwrap();
+        let mut message: Message = serde_json::from_slice(&buffer[..n]).expect("hoge");
 
         match message.content {
             MessageContent::ACK(_ack) => {
@@ -55,49 +70,59 @@ async fn main() -> io::Result<()> {
 
                         /***************** tick *******************/
                         thread::sleep(TICK_INTERVAL);
-                        clock::sleep_random_interval();
+                        clock::sleep_random_interval(1);
 
                         let ack_message =
                             req.gen_ack(*MY_RECEIVER_ID, get_current_timestamp(&shared_value));
-
-                        // ackをキューに入れる
-                        queue.push_front(ack_message.clone());
-
+                        let serialized = serde_json::to_vec(&ack_message).unwrap();
                         // ackの送信
-                        message_handler
-                            .send_message(ack_message, &TARGET_ADDRESS)
-                            .await;
-                        println!("------------- <REQ received from receiver>");
+                        // マルチキャストメッセージを送信するスレッド
+                        let send_socket = socket.try_clone().expect("Failed to clone socket");
+                        thread::spawn(move || {
+                            send_socket
+                                .send_to(&serialized, &format!("{}:{}", MULTICAST_ADDR, PORT))
+                                .expect("Failed to send multicast message");
+                        });
                     }
 
                     /* タイムスタンプなし --> オペレータからの受信 */
                     None => {
                         /* レシーバ間のタイムスタンプに若干の差分を生じさせるために、スリープさせる */
-                        clock::sleep_random_interval();
+                        clock::sleep_random_interval(1);
 
                         /* リクエストにタイムスタンプを付与し、キューに入れる */
                         message.timestamp = get_current_timestamp(&shared_value);
                         queue.push_front(message.clone());
 
-                        message_handler
-                            .send_message(message.clone(), &TARGET_ADDRESS)
-                            .await;
+                        let send_socket = socket.try_clone().expect("Failed to clone socket");
+                        thread::spawn(move || {
+                            // loop {
+                            send_socket
+                                .send_to(
+                                    &serde_json::to_vec(&message).unwrap(),
+                                    &format!("{}:{}", MULTICAST_ADDR, PORT),
+                                )
+                                .expect("Failed to send multicast message");
+                            // }
+                        });
 
                         /***************** tick *******************/
-                        clock::sleep_random_interval();
+                        clock::sleep_random_interval(1);
 
                         // ackの生成
                         let ack_message =
                             req.gen_ack(*MY_RECEIVER_ID, get_current_timestamp(&shared_value));
-
+                        let serialized = serde_json::to_vec(&ack_message).unwrap();
                         // ackをキューに入れる
-                        queue.push_front(ack_message.clone());
+                        // queue.push_front(ack_message.clone());
 
                         // ackの送信
-                        message_handler
-                            .send_message(ack_message, &TARGET_ADDRESS)
-                            .await;
-                        println!("------------- <REQ received from operator>");
+                        let send_socket = socket.try_clone().expect("Failed to clone socket");
+                        thread::spawn(move || {
+                            send_socket
+                                .send_to(&serialized, &format!("{}:{}", MULTICAST_ADDR, PORT))
+                                .expect("Failed to send multicast message");
+                        });
                     }
                 }
             }
