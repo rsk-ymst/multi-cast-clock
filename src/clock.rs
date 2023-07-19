@@ -6,6 +6,8 @@ use std::{
 
 use rand::Rng;
 
+use crate::ipc::{MessageQueue, Message, MessageContent};
+
 pub const TICK_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Default)]
@@ -59,4 +61,13 @@ pub fn adjust_time_clock(current_time: &Arc<Mutex<LogicClock>>, received_time: f
     };
 
     // drop(current); // Mutexロック解除
+}
+
+/* 論理クロックの現時刻を取得すｒすｒu */
+pub fn get_current_timestamp(value: &Arc<Mutex<LogicClock>>) -> Option<f64> {
+    let current = value.lock().unwrap();
+    let res = current.clock;
+
+    drop(current); // Mutexロック解除
+    Some(res)
 }

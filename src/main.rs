@@ -3,7 +3,7 @@ mod ipc;
 mod operator;
 mod utils;
 
-use clock::LogicClock;
+use clock::*;
 use ipc::display_log;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
@@ -13,7 +13,10 @@ use std::sync::{Arc, Mutex};
 use std::{io, thread};
 
 use crate::clock::TICK_INTERVAL;
-use crate::ipc::{Message, MessageContent, MessageQueue, ReceiverId, REQ};
+use crate::ipc::{
+    check_and_execute_task, sort_message_queue, Message, MessageContent, MessageQueue, ReceiverId,
+    REQ,
+};
 
 #[macro_use]
 extern crate lazy_static;
@@ -32,12 +35,17 @@ const PORT: u16 = 8080;
 // mod operator;
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    println!("{}", MY_ADDRESS.to_string());
+    println!(
+        "assigned info: {}, {}",
+        MY_ADDRESS.to_string(),
+        *MY_RECEIVER_ID
+    );
 
-    let shared_value = Arc::new(Mutex::new(clock::LogicClock::default()));
+    /* 論理クロックはスレッド間で共有するので、Arcとして宣言 */
+    let logic_clock = Arc::new(Mutex::new(clock::LogicClock::default()));
 
-    /* クロック開始 */
-    clock::start_clock_tick(&shared_value);
+    /* tickスレッド開始 */
+    clock::start_clock_tick(&logic_clock);
 
     let mut queue = MessageQueue::new();
 
@@ -54,29 +62,31 @@ async fn main() -> io::Result<()> {
 
         /* REQ | ACK の受信 */
         let (n, _) = socket.recv_from(buffer).unwrap();
-        let mut message: Message = serde_json::from_slice(&buffer[..n]).expect("hoge");
+        let message: Message = serde_json::from_slice(&buffer[..n]).expect("hoge");
 
         match message.content {
             // =======================================
             //              ACKの受信
             // =======================================
             MessageContent::ACK(_ack) => {
+                println!("------<ACK>------");
+                adjust_time_clock(&logic_clock, message.timestamp.unwrap());
                 /* トランザクション */
                 queue.push_front(message.clone());
-
-                println!("------------- <ACK received>");
             }
 
             // =======================================
             //         オペレータからのリクエスト
             // =======================================
             MessageContent::OPE(request) => {
+                println!("------<OPE>------");
+
                 /* レシーバ間のタイムスタンプに若干の差分を生じさせるために、スリープさせる */
                 clock::sleep_random_interval(1);
 
                 let timestamped_message = Message {
                     content: ipc::MessageContent::REQ(request.clone()),
-                    timestamp: get_current_timestamp(&shared_value),
+                    timestamp: clock::get_current_timestamp(&logic_clock),
                 };
 
                 queue.push_front(timestamped_message.clone());
@@ -99,7 +109,7 @@ async fn main() -> io::Result<()> {
                 // ackの生成
                 if let MessageContent::REQ(req) = timestamped_message.content {
                     let ack_message =
-                        req.gen_ack(*MY_RECEIVER_ID, get_current_timestamp(&shared_value));
+                        req.gen_ack(*MY_RECEIVER_ID, clock::get_current_timestamp(&logic_clock));
 
                     let serialized = serde_json::to_vec(&ack_message).unwrap();
 
@@ -119,10 +129,15 @@ async fn main() -> io::Result<()> {
             //       プロセスからのリクエスト受信
             // =======================================
             MessageContent::REQ(req) => {
+
+                /* 再帰的なREQは無視する */
                 if req.src.cmp(&MY_RECEIVER_ID) == Ordering::Equal {
-                    println!("its mine");
+                    // println!("its mine");
                     continue;
                 }
+
+                println!("------<REQ>------");
+                adjust_time_clock(&logic_clock, message.timestamp.unwrap());
 
                 queue.push_front(message.clone());
 
@@ -131,11 +146,10 @@ async fn main() -> io::Result<()> {
                 // clock::sleep_random_interval(1);
 
                 let ack_message =
-                    req.gen_ack(*MY_RECEIVER_ID, get_current_timestamp(&shared_value));
+                    req.gen_ack(*MY_RECEIVER_ID, clock::get_current_timestamp(&logic_clock));
                 let serialized = serde_json::to_vec(&ack_message).unwrap();
 
                 // ackの送信
-                // マルチキャストメッセージを送信するスレッド
                 let send_socket = socket.try_clone().expect("Failed to clone socket");
                 thread::spawn(move || {
                     send_socket
@@ -153,87 +167,4 @@ async fn main() -> io::Result<()> {
         // キューのチェック；もしACKが揃っていればタスク実行＆ACK削除．
         check_and_execute_task(&mut queue);
     }
-}
-
-pub fn get_current_timestamp(value: &Arc<Mutex<LogicClock>>) -> Option<f64> {
-    let current = value.lock().unwrap();
-    let res = current.clock;
-
-    drop(current); // Mutexロック解除
-    Some(res)
-}
-
-pub fn check_and_execute_task(queue: &mut MessageQueue) {
-    let traversal_buf = queue.clone();
-    for (_, message) in traversal_buf.iter().enumerate() {
-        if let MessageContent::REQ(req) = message.content {
-            /* 削除する可能性があるメッセージを保持するベクタ */
-            let mut possibly_delete_message: Vec<Message> = Vec::new();
-
-            /* Ackの発行元を保持するベクタ */
-            possibly_delete_message.push(message.clone());
-            let mut ack_publisher_list = Vec::new();
-
-            /* Reqに対応するAckを走査する */
-            for (_, m) in queue.iter().enumerate() {
-                if let MessageContent::ACK(ack) = &m.content {
-                    if req.src == ack.src {
-                        ack_publisher_list.push(ack.publisher);
-                        possibly_delete_message.push(m.clone());
-                    }
-                }
-            }
-
-            /* REQに対応するACKが全て存在していたら、タスク実行し、タスクと対応Ackを消去 */
-            if ack_publisher_list.contains(&MY_RECEIVER_ID)
-                && ack_publisher_list.contains(&TARGET_RECEIVER_ID)
-            {
-                println!("------------- <exec>\n{req:#?}");
-
-                /* REQと対応ACKを消去 */
-                possibly_delete_message.into_iter().for_each(|mes| {
-                    /* 所有権の都合上、queueのクローンで走査する */
-                    let buf = queue.clone();
-                    for (i, e) in buf.iter().enumerate() {
-                        if mes == *e {
-                            queue.remove(i);
-                        }
-                    }
-                });
-
-                println!("------------- <remove required REQ and ACK>");
-                queue.iter().for_each(|x| display_log(x));
-            }
-            // }
-        }
-    }
-}
-
-pub fn get_min_timestamp_req(queue: &MessageQueue) -> Result<Message, ()> {
-    let mut req_rev: Vec<Message> = Vec::new();
-
-    queue.iter().for_each(|m| {
-        if let MessageContent::REQ(_) = m.content {
-            req_rev.push(m.clone());
-        }
-    });
-
-    if req_rev.len() == 0 {
-        return Err(());
-    }
-
-    Ok(req_rev.get(0).unwrap().clone())
-}
-
-pub fn sort_message_queue(queue: &MessageQueue) -> MessageQueue {
-    let mut buf_vec: Vec<Message> = queue.clone().into_iter().collect();
-
-    buf_vec.sort_by(|a, b| {
-        a.timestamp
-            .unwrap()
-            .partial_cmp(&b.timestamp.unwrap())
-            .unwrap()
-    });
-
-    VecDeque::from(buf_vec)
 }

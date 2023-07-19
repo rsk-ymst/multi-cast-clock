@@ -6,6 +6,8 @@ use std::{
     net::{IpAddr, UdpSocket},
 };
 
+use crate::{MY_RECEIVER_ID, TARGET_RECEIVER_ID};
+
 /* メッセージ管理用キュー */
 pub type MessageQueue = VecDeque<Message>;
 pub type Timestamp = Option<f64>;
@@ -124,6 +126,66 @@ impl UdpMessageHandler {
         self.socket.send_to(&serialized, dst_addr).unwrap();
     }
 }
+
+pub fn sort_message_queue(queue: &MessageQueue) -> MessageQueue {
+    let mut buf_vec: Vec<Message> = queue.clone().into_iter().collect();
+
+    buf_vec.sort_by(|a, b| {
+        a.timestamp
+            .unwrap()
+            .partial_cmp(&b.timestamp.unwrap())
+            .unwrap()
+    });
+
+    VecDeque::from(buf_vec)
+}
+
+pub fn check_and_execute_task(queue: &mut MessageQueue) {
+    let traversal_buf = queue.clone();
+    for (_, message) in traversal_buf.iter().enumerate() {
+        if let MessageContent::REQ(req) = message.content {
+            /* 削除する可能性があるメッセージを保持するベクタ */
+            let mut possibly_delete_message: Vec<Message> = Vec::new();
+
+            /* Ackの発行元を保持するベクタ */
+            possibly_delete_message.push(message.clone());
+            let mut ack_publisher_list = Vec::new();
+
+            /* Reqに対応するAckを走査する */
+            for (_, m) in queue.iter().enumerate() {
+                if let MessageContent::ACK(ack) = &m.content {
+                    if req.src == ack.src {
+                        ack_publisher_list.push(ack.publisher);
+                        possibly_delete_message.push(m.clone());
+                    }
+                }
+            }
+
+            /* REQに対応するACKが全て存在していたら、タスク実行し、タスクと対応Ackを消去 */
+            if ack_publisher_list.contains(&MY_RECEIVER_ID)
+                && ack_publisher_list.contains(&TARGET_RECEIVER_ID)
+            {
+                println!("------------- <exec>\n{req:#?}");
+
+                /* REQと対応ACKを消去 */
+                possibly_delete_message.into_iter().for_each(|mes| {
+                    /* 所有権の都合上、queueのクローンで走査する */
+                    let buf = queue.clone();
+                    for (i, e) in buf.iter().enumerate() {
+                        if mes == *e {
+                            queue.remove(i);
+                        }
+                    }
+                });
+
+                println!("------------- <remove required REQ and ACK>");
+                queue.iter().for_each(|x| display_log(x));
+            }
+        }
+    }
+}
+
+
 
 pub fn display_log(message: &Message) {
     // println!("display....");
