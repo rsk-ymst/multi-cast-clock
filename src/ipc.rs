@@ -1,6 +1,6 @@
+use crate::{MY_RECEIVER_ID, TARGET_RECEIVER_ID};
 use serde_derive::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use crate::{MY_RECEIVER_ID, TARGET_RECEIVER_ID};
 
 /* メッセージ管理用キュー */
 pub type MessageQueue = VecDeque<Message>;
@@ -16,18 +16,11 @@ pub struct Message {
     pub timestamp: Timestamp,
 }
 
-/* メッセージの内容はACKもしくはREQとなる。*/
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum MessageContent {
     ACK(ACK), // リクエストに対する認証
     REQ(REQ), // レシーバが発行するリクエスト
     OPE(REQ), // オペレータが発行するリクエスト
-}
-#[derive(PartialEq, Serialize, Deserialize, Debug, Clone, Copy)]
-pub struct ACK {
-    pub req_id: Option<usize>, // REQに紐づくID. originと紐づいて初めて固有の値となる
-    pub src: ReceiverId,       // オペレーションの受付元
-    pub publisher: ReceiverId, // 認証の発行元
 }
 
 #[derive(PartialEq, Serialize, Deserialize, Debug, Clone, Default, Copy)]
@@ -35,6 +28,23 @@ pub struct REQ {
     pub id: usize,      // queue内で識別するために必要
     pub src: usize,     // オペレーションの受付元
     pub method: METHOD, // 操作内容
+}
+
+#[derive(PartialEq, Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct ACK {
+    pub req_id: Option<usize>, // REQに紐づくID
+    pub src: ReceiverId,       // オペレーションの受付元
+    pub publisher: ReceiverId, // 認証の発行元
+}
+
+/* プロセスはCRUDアプリと仮定し、REQUESTの内容は以下のいずれかになる。*/
+#[derive(Serialize, Deserialize, Debug, Clone, Default, Copy, PartialEq)]
+pub enum METHOD {
+    CREATE,
+    READ,
+    #[default]
+    UPDATE,
+    DELETE,
 }
 
 impl REQ {
@@ -61,16 +71,6 @@ impl REQ {
             timestamp,
         }
     }
-}
-
-/* プロセスはCRUDアプリと仮定し、REQUESTの内容は以下のいずれかになる。*/
-#[derive(Serialize, Deserialize, Debug, Clone, Default, Copy, PartialEq)]
-pub enum METHOD {
-    CREATE,
-    READ,
-    #[default]
-    UPDATE,
-    DELETE,
 }
 
 /*
@@ -165,6 +165,4 @@ pub fn display_log(message: &Message) {
             return;
         }
     };
-
-    // println!("display....done");
 }

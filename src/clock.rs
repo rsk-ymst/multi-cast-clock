@@ -58,8 +58,6 @@ pub fn adjust_time_clock(current_time: &Arc<Mutex<LogicClock>>, received_time: f
         }
         Err(_) => panic!(),
     };
-
-    // drop(current); // Mutexロック解除
 }
 
 /* 論理クロックの現時刻を取得する関数 */
