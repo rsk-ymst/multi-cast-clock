@@ -1,31 +1,23 @@
-use serde::{Deserialize, Serialize};
 use serde_derive::{Deserialize, Serialize};
-use std::{
-    collections::VecDeque,
-    default,
-    net::{IpAddr, UdpSocket},
-};
-
+use std::collections::VecDeque;
 use crate::{MY_RECEIVER_ID, TARGET_RECEIVER_ID};
 
 /* メッセージ管理用キュー */
 pub type MessageQueue = VecDeque<Message>;
 pub type Timestamp = Option<f64>;
 
-/* レシーバの定義。今回はAとBの */
+/* レシーバID */
 pub type ReceiverId = usize;
 
-#[derive(PartialEq)]
 /* メッセージの内容はACKもしくはREQとなる。*/
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Message {
     pub content: MessageContent,
     pub timestamp: Timestamp,
 }
 
-#[derive(PartialEq)]
 /* メッセージの内容はACKもしくはREQとなる。*/
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum MessageContent {
     ACK(ACK), // リクエストに対する認証
     REQ(REQ), // レシーバが発行するリクエスト
@@ -40,10 +32,9 @@ pub struct ACK {
 
 #[derive(PartialEq, Serialize, Deserialize, Debug, Clone, Default, Copy)]
 pub struct REQ {
-    pub id: Option<usize>, // queue内で識別するために必要
-    pub src: usize,   // オペレーションの受付元
-    pub method: METHOD,    // 操作内容
-    pub done: bool,        // 操作が完了したかどうか
+    pub id: usize,      // queue内で識別するために必要
+    pub src: usize,     // オペレーションの受付元
+    pub method: METHOD, // 操作内容
 }
 
 impl REQ {
@@ -53,10 +44,9 @@ impl REQ {
     */
     pub fn default() -> Self {
         REQ {
-            id: None,
+            id: 0,
             src: ReceiverId::default(),
             method: METHOD::default(),
-            done: false,
             // timestamp: None,
         }
     }
@@ -64,7 +54,7 @@ impl REQ {
     pub fn gen_ack(&self, publisher: ReceiverId, timestamp: Timestamp) -> Message {
         Message {
             content: MessageContent::ACK(ACK {
-                req_id: self.id,
+                req_id: Some(self.id),
                 src: self.src,
                 publisher,
             }),
@@ -83,50 +73,9 @@ pub enum METHOD {
     DELETE,
 }
 
-pub async fn recv_message(socket: &UdpSocket) -> MessageContent {
-    let mut buffer: &mut [u8] = &mut [0u8; 2048];
-
-    match socket.recv_from(buffer) {
-        Ok((n, _)) => {
-            return serde_json::from_slice(&buffer[..n]).expect("hoge");
-        }
-        Err(_) => {
-            panic!("recv_data error...");
-        }
-    }
-}
-
-pub struct UdpMessageHandler {
-    socket: UdpSocket,
-}
-
-impl UdpMessageHandler {
-    pub fn new(addr: &str) -> Self {
-        UdpMessageHandler {
-            socket: UdpSocket::bind(addr).unwrap(),
-        }
-    }
-
-    pub async fn recv_message(&self) -> Message {
-        let mut buffer: &mut [u8] = &mut [0u8; 2048];
-
-        match self.socket.recv_from(buffer) {
-            Ok((n, _)) => {
-                return serde_json::from_slice(&buffer[..n]).expect("hoge");
-            }
-            Err(_) => {
-                panic!("recv_data error...");
-            }
-        }
-    }
-
-    pub async fn send_message(&self, message: Message, dst_addr: &str) {
-        let serialized = serde_json::to_vec(&message).unwrap();
-
-        self.socket.send_to(&serialized, dst_addr).unwrap();
-    }
-}
-
+/*
+    キューの内容をソートする関数
+*/
 pub fn sort_message_queue(queue: &MessageQueue) -> MessageQueue {
     let mut buf_vec: Vec<Message> = queue.clone().into_iter().collect();
 
@@ -140,6 +89,9 @@ pub fn sort_message_queue(queue: &MessageQueue) -> MessageQueue {
     VecDeque::from(buf_vec)
 }
 
+/*
+    キューの内容をチェックし、ACKが揃っているREQがあれば実行する関数
+*/
 pub fn check_and_execute_task(queue: &mut MessageQueue) {
     let traversal_buf = queue.clone();
     for (_, message) in traversal_buf.iter().enumerate() {
@@ -185,11 +137,10 @@ pub fn check_and_execute_task(queue: &mut MessageQueue) {
     }
 }
 
-
-
+/*
+    メッセージの状態を表示する関数
+*/
 pub fn display_log(message: &Message) {
-    // println!("display....");
-
     match message.content {
         MessageContent::ACK(ack) => {
             println!(

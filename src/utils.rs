@@ -23,13 +23,3 @@ pub mod args {
             .to_string()
     }
 }
-
-pub fn get_arg_as_usize(idx: usize) -> usize {
-    args()
-        .collect::<Vec<String>>()
-        .get(idx)
-        .unwrap()
-        .as_str()
-        .parse()
-        .unwrap()
-}
